@@ -42,7 +42,6 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && \
     lsb-release \
     software-properties-common \
     tzdata \
-    iproute2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy install scripts
@@ -74,6 +73,16 @@ ENV LD_LIBRARY_PATH=$TensorRT_ROOT/lib:$LD_LIBRARY_PATH
 # Set up ONNX Runtime environment
 ENV onnxruntime_DIR=/opt/onnxruntime/lib/cmake/onnxruntime
 ENV LD_LIBRARY_PATH=/opt/onnxruntime/lib:$LD_LIBRARY_PATH
+
+ENV LD_LIBRARY_PATH=/opt/TensorRT/lib:$LD_LIBRARY_PATH
+
+
+# Add NVIDIA ML repo
+RUN apt-get update && apt-get install -y wget gnupg && \
+    wget https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu2204/x86_64/nvidia-machine-learning-repo-ubuntu2204_1.0.0-1_amd64.deb && \
+    dpkg -i nvidia-machine-learning-repo-ubuntu2204_1.0.0-1_amd64.deb && \
+    apt-get update && \
+    apt-get install -y tensorrt
 
 WORKDIR /workspace
 

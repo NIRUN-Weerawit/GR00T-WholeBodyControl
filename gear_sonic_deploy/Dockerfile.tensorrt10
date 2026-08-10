@@ -1,0 +1,15 @@
+# Dockerfile with TensorRT 10.1 for CUDA 12.4 compatibility
+FROM g1-deploy-dev:latest
+
+# Install TensorRT 10.1 (compatible with CUDA 12.4)
+RUN apt-get update && apt-get install -y \
+    libnvinfer-headers-dev=10.1.0.27-1+cuda12.4 \
+    libnvinfer-headers-plugin-dev=10.1.0.27-1+cuda12.4 \
+    libnvinfer-dev=10.1.0.27-1+cuda12.4 \
+    libnvinfer10=10.1.0.27-1+cuda12.4 \
+    libnvinfer-plugin-dev=10.1.0.27-1+cuda12.4 \
+    libnvinfer-plugin10=10.1.0.27-1+cuda12.4 \
+    libnvonnxparsers-dev=10.1.0.27-1+cuda12.4 \
+    libnvonnxparsers10=10.1.0.27-1+cuda12.4 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
