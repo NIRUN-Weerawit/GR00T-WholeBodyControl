@@ -255,11 +255,11 @@ class BaseConfig(ArgsConfigTemplate):
     inference_host: str = "localhost"
     """Inference server host"""
 
-    inference_port: int = 5558
-    """Inference server port (default 5558 to avoid conflict with camera_port 5555)"""
+    inference_port: int = 5555
+    """Inference server port"""
 
-    inference_remote: bool = False
-    """Whether to run inference on a remote server."""
+    inference_on_osmo: bool = False
+    """Whether to run inference on osmo."""
 
     inference_prompt: str = "Pick up apple from table to plate"
     """Inference prompt"""
@@ -341,6 +341,15 @@ class SimLoopConfig(BaseConfig):
 
     camera_port: int = 5555
     """Camera port for image publishing"""
+
+    camera_width: int = 640
+    """Width in pixels of each offscreen RGB camera."""
+
+    camera_height: int = 480
+    """Height in pixels of each offscreen RGB camera."""
+
+    camera_fps: float = 30.0
+    """Capture and publish rate for the offscreen RGB cameras."""
 
     verbose: bool = False
     """Verbose output, override the base config verbose"""

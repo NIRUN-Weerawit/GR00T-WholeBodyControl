@@ -8,7 +8,7 @@ from typing import Dict
 
 import tyro
 
-from gear_sonic.utils.mujoco_sim.simulator_factory import SimulatorFactory, init_channel
+from gear_sonic.utils.mujoco_sim.simulator_factory import SimulatorFactory
 from gear_sonic.utils.mujoco_sim.configs import SimLoopConfig
 from gear_sonic.data.robot_model.instantiation.g1 import (
     instantiate_g1_robot_model,
@@ -23,12 +23,27 @@ class SimWrapper:
         self.robot_model = robot_model
         self.config = config
 
-        init_channel(config=self.config)
+        # BaseSimulator initializes the Unitree channel exactly once.
+
+        # These names resolve to the two fixed cameras in scene_43dof.xml.
+        # Keeping their configuration here makes the same sensors available to
+        # the ZMQ publisher and any downstream recorder.
+        camera_configs = {
+            "teleop_front": {
+                "width": config["CAMERA_WIDTH"],
+                "height": config["CAMERA_HEIGHT"],
+            },
+            "teleop_side": {
+                "width": config["CAMERA_WIDTH"],
+                "height": config["CAMERA_HEIGHT"],
+            },
+        }
 
         # Create simulator using factory
         self.sim = SimulatorFactory.create_simulator(
             config=self.config,
             env_name=env_name,
+            camera_configs=camera_configs,
             **kwargs,
         )
 
@@ -37,6 +52,14 @@ def main(config: ArgsConfig):
     wbc_config = config.load_wbc_yaml()
     # NOTE: we will override the interface to local if it is not specified
     wbc_config["ENV_NAME"] = config.env_name
+    if config.camera_fps <= 0:
+        raise ValueError("camera_fps must be positive")
+
+    # The named cameras are defined in scene_43dof.xml; these values configure
+    # their offscreen render targets and capture cadence.
+    wbc_config["CAMERA_WIDTH"] = config.camera_width
+    wbc_config["CAMERA_HEIGHT"] = config.camera_height
+    wbc_config["IMAGE_DT"] = 1.0 / config.camera_fps
 
     if config.enable_image_publish:
         assert (
@@ -51,7 +74,6 @@ def main(config: ArgsConfig):
         config=wbc_config,
         onscreen=wbc_config.get("ENABLE_ONSCREEN", True),
         offscreen=wbc_config.get("ENABLE_OFFSCREEN", False),
-        enable_image_publish=config.enable_image_publish,
     )
     # Start simulator as independent process
     SimulatorFactory.start_simulator(

@@ -7,7 +7,8 @@
   <visual>
     <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
     <rgba haze="0.15 0.25 0.35 1"/>
-    <global azimuth="-130" elevation="-20"/>
+    <!-- Largest supported offscreen camera frame; renderer outputs may be smaller. -->
+    <global azimuth="-130" elevation="-20" offwidth="1920" offheight="1080"/>
   </visual>
 
   <asset>
@@ -19,9 +20,69 @@
 
   <worldbody>
     <light pos="0 0 1.5" dir="0 0 -1" directional="true"/>
+    <!-- RGB cameras used by run_sim_loop.py offscreen image publishing. -->
+    <!-- Camera optical axis is local -Z; xyaxes defines image-right then image-up. -->
+    <camera name="teleop_front" pos="2.4 -2.4 1.6"
+      xyaxes="0.707107 0.707107 0 -0.171647 0.171647 0.970143" fovy="55"/>
+    <camera name="teleop_side" pos="0 -3.0 1.25"
+      xyaxes="1 0 0 0 0.164399 0.986394" fovy="55"/>
     <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
     <!-- Site -->
     <site name="com_marker" pos="0.1 0 0" size="0.05" rgba="1 0 0 1" type="sphere"/>
+
+    <!-- Movable objects for interaction / manipulation -->
+    <!-- Small red box in front -->
+    <body name="box_red_body" pos="0.6 0.0 0.5">
+      <freejoint name="box_red_joint"/>
+      <geom name="box_red" type="box" size="0.04 0.04 0.04" rgba="0.9 0.2 0.2 1" friction="1.0 0.5 0.5" mass="0.5"/>
+    </body>
+    <!-- Small green box right -->
+    <body name="box_green_body" pos="0.5 0.4 0.5">
+      <freejoint name="box_green_joint"/>
+      <geom name="box_green" type="box" size="0.04 0.04 0.04" rgba="0.2 0.8 0.2 1" friction="1.0 0.5 0.5" mass="0.5"/>
+    </body>
+    <!-- Blue sphere left -->
+    <body name="sphere_blue_body" pos="0.4 -0.4 0.5">
+      <freejoint name="sphere_blue_joint"/>
+      <geom name="sphere_blue" type="sphere" size="0.05" rgba="0.2 0.3 0.9 1" friction="1.0 0.5 0.5" mass="0.5"/>
+    </body>
+    <!-- Yellow cylinder behind -->
+    <body name="cylinder_yellow_body" pos="-0.4 0.3 0.5">
+      <freejoint name="cylinder_yellow_joint"/>
+      <geom name="cylinder_yellow" type="cylinder" size="0.04 0.1" rgba="0.9 0.9 0.1 1" friction="1.0 0.5 0.5" mass="0.5"/>
+    </body>
+    <!-- Low wall (movable) -->
+    <body name="wall_low_body" pos="0.8 0.0 0.5">
+      <freejoint name="wall_low_joint"/>
+      <geom name="wall_low" type="box" size="0.3 0.02 0.05" rgba="0.5 0.5 0.5 1" friction="1.0 0.5 0.5" mass="1.0"/>
+    </body>
+
+    <!-- Bigger objects -->
+    <!-- Large orange box -->
+    <body name="box_orange_big_body" pos="1.0 -0.6 0.5">
+      <freejoint name="box_orange_big_joint"/>
+      <geom name="box_orange_big" type="box" size="0.1 0.1 0.1" rgba="1.0 0.5 0.0 1" friction="1.0 0.5 0.5" mass="3.0"/>
+    </body>
+    <!-- Big purple sphere -->
+    <body name="sphere_purple_big_body" pos="-0.8 -0.5 0.5">
+      <freejoint name="sphere_purple_big_joint"/>
+      <geom name="sphere_purple_big" type="sphere" size="0.12" rgba="0.6 0.2 0.8 1" friction="1.0 0.5 0.5" mass="4.0"/>
+    </body>
+    <!-- Tall cyan cylinder -->
+    <body name="cylinder_cyan_tall_body" pos="-0.6 0.8 0.5">
+      <freejoint name="cylinder_cyan_tall_joint"/>
+      <geom name="cylinder_cyan_tall" type="cylinder" size="0.06 0.2" rgba="0.0 0.8 0.8 1" friction="1.0 0.5 0.5" mass="2.0"/>
+    </body>
+    <!-- Wide flat wooden plank -->
+    <body name="plank_wood_body" pos="0.3 -0.8 0.5">
+      <freejoint name="plank_wood_joint"/>
+      <geom name="plank_wood" type="box" size="0.4 0.08 0.02" rgba="0.6 0.4 0.2 1" friction="1.0 0.5 0.5" mass="1.5"/>
+    </body>
+    <!-- Big table-like block -->
+    <body name="block_table_body" pos="-0.3 -0.6 0.5">
+      <freejoint name="block_table_joint"/>
+      <geom name="block_table" type="box" size="0.2 0.15 0.08" rgba="0.3 0.3 0.3 1" friction="1.0 0.5 0.5" mass="5.0"/>
+    </body>
   </worldbody>
 
   <default>
