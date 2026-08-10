@@ -19,7 +19,7 @@ CORES := if os() == "macos" { `sysctl -n hw.ncpu` } else if os() == "linux" { `n
 build *build_type='Release':
   @mkdir -p build
   @echo "Configuring the build system..."
-  @cd build && cmake -S .. -B . -DCMAKE_BUILD_TYPE={{build_type}} -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+  @cd build && cmake -S .. -B . -DCMAKE_BUILD_TYPE={{build_type}} -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_C_COMPILER=gcc-11 -DCMAKE_CXX_COMPILER=g++-11
   @echo "Building the project..."
   @cd build && cmake --build . -j{{CORES}}
 

@@ -8,25 +8,31 @@
 #  onnxruntime::onnxruntime - Imported target for ONNX Runtime
 
 # Try to find ONNX Runtime installation
+# Check common installation paths
+set(ONNX_RUNTIME_SEARCH_PATHS
+    "$ENV{HOME}/.local/onnxruntime"
+    /opt/onnxruntime
+    /usr/local/onnxruntime
+    /usr/lib/onnxruntime
+    /usr/local
+    /usr
+)
+
 find_path(onnxruntime_INCLUDE_DIR
   NAMES onnxruntime_cxx_api.h
   PATHS
     ENV onnxruntime_ROOT
     ENV onnxruntime_DIR
-    /opt/onnxruntime
-    /usr/local
-    /usr
+    ${ONNX_RUNTIME_SEARCH_PATHS}
   PATH_SUFFIXES include
 )
 
 find_library(onnxruntime_LIBRARY
-  NAMES onnxruntime
+  NAMES onnxruntime libonnxruntime
   PATHS
     ENV onnxruntime_ROOT
     ENV onnxruntime_DIR
-    /opt/onnxruntime
-    /usr/local
-    /usr
+    ${ONNX_RUNTIME_SEARCH_PATHS}
   PATH_SUFFIXES lib lib64
 )
 

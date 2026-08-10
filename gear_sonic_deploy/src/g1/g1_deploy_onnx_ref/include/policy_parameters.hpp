@@ -140,7 +140,7 @@ const std::array<double, 29> g1_action_scale = {
 
 // PID control gains - Position gains (Kp)
 // These values are computed based on the stiffness constants above
-const std::array<float, 29> kps = {
+const std::array<double, 29> kps = {
     STIFFNESS_7520_22, // left_hip_pitch_joint (old is 7520_14 new is 7520_22）
     STIFFNESS_7520_22, // left_hip_roll_joint
     STIFFNESS_7520_14, // left_hip_yaw_joint
@@ -174,7 +174,7 @@ const std::array<float, 29> kps = {
 
 // PID control gains - Derivative gains (Kd)
 // These values are computed based on the damping constants above
-const std::array<float, 29> kds = {
+const std::array<double, 29> kds = {
     DAMPING_7520_22, // left_hip_pitch_joint (old is 7520_14 new is 7520_22）
     DAMPING_7520_22, // left_hip_roll_joint
     DAMPING_7520_14, // left_hip_yaw_joint

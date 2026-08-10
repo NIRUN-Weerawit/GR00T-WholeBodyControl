@@ -27,7 +27,7 @@ endif()
 # Find msgpack for message serialization (used by ROS2 and ZMQ handlers)
 # msgpack is header-only and doesn't provide pkg-config, so we check for the header directly
 find_path(MSGPACK_INCLUDE_DIR msgpack.hpp
-  PATHS /usr/include /usr/local/include
+  PATHS /usr/include /usr/local/include ${CMAKE_SOURCE_DIR}/third_party/msgpack-headers
   DOC "msgpack C++ header location"
 )
 
@@ -35,7 +35,14 @@ if(MSGPACK_INCLUDE_DIR)
   message(STATUS "✅ msgpack found at: ${MSGPACK_INCLUDE_DIR}")
   set(MSGPACK_INCLUDE_DIRS ${MSGPACK_INCLUDE_DIR})
 else()
-  message(FATAL_ERROR "msgpack not found. Install libmsgpack-dev (Ubuntu/Debian) or msgpack-cxx (Arch) or msgpack-devel (RHEL/CentOS)")
+  # Fallback to bundled msgpack headers
+  set(MSGPACK_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/third_party/msgpack-headers)
+  if(EXISTS ${MSGPACK_INCLUDE_DIR}/msgpack.hpp)
+    message(STATUS "✅ msgpack found at bundled location: ${MSGPACK_INCLUDE_DIR}")
+    set(MSGPACK_INCLUDE_DIRS ${MSGPACK_INCLUDE_DIR})
+  else()
+    message(FATAL_ERROR "msgpack not found. Install libmsgpack-dev (Ubuntu/Debian) or msgpack-cxx (Arch) or msgpack-devel (RHEL/CentOS)")
+  endif()
 endif()
 
 file(GLOB_RECURSE PROJECT_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
@@ -52,19 +59,7 @@ endif()
 
 # Detect architecture and conditionally set CUDA library paths
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
-  # Check for Thor (no DLA support)
-  set(IS_THOR FALSE)
-  if(DEFINED ENV{IS_THOR} AND "$ENV{IS_THOR}" STREQUAL "true")
-    set(IS_THOR TRUE)
-  elseif(EXISTS "/proc/device-tree/model")
-    file(READ "/proc/device-tree/model" DEVICE_MODEL)
-    string(FIND "${DEVICE_MODEL}" "Thor" THOR_POS)
-    if(NOT THOR_POS EQUAL -1)
-      set(IS_THOR TRUE)
-    endif()
-  endif()
-
-  # ARM/Jetson platform - conditionally add DLA support
+  # ARM/Jetson platform - add DLA support
   # Dynamically find CUDA installation for ARM
   if(DEFINED ENV{CUDAToolkit_ROOT})
     set(CUDA_ARM_LIB_PATH "$ENV{CUDAToolkit_ROOT}/targets/aarch64-linux/lib")
@@ -82,20 +77,11 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
   endif()
 
   set(CUDA_LINK_DIRS ${CUDA_ARM_LIB_PATH})
-
-  # DLA support: only for non-Thor Jetson devices
-  if(IS_THOR)
-    set(CUDLA_LIBRARY "")
-    message(STATUS "🚀 ARM64 (Thor) detected - building without DLA support")
-    message(STATUS "   Using CUDA library path: ${CUDA_ARM_LIB_PATH}")
-    message(STATUS "   Thor doesn't have DLA engines")
-  else()
-    # Match bare-metal Jetson builds: link cudla from the CUDA toolkit (targets/aarch64-linux/lib)
-    set(CUDLA_LIBRARY "cudla")
-    message(STATUS "✅ ARM64 detected - enabling DLA (cudla) support")
-    message(STATUS "   Using CUDA library path: ${CUDA_ARM_LIB_PATH}")
-    message(STATUS "   Using CUDLA library: -l${CUDLA_LIBRARY}")
-  endif()
+  # Match bare-metal Jetson builds: link cudla from the CUDA toolkit (targets/aarch64-linux/lib)
+  set(CUDLA_LIBRARY "cudla")
+  message(STATUS "✅ ARM64 detected - enabling DLA (cudla) support")
+  message(STATUS "   Using CUDA library path: ${CUDA_ARM_LIB_PATH}")
+  message(STATUS "   Using CUDLA library: -l${CUDLA_LIBRARY}")
   
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
   # x86_64 platform - no DLA support needed
@@ -216,13 +202,16 @@ set_target_properties(
              CXX_STANDARD_REQUIRED ON
              CXX_EXTENSIONS OFF)
 
+# Add msgpack include directory to main executable (needed for ZMQ handlers)
+target_include_directories(${EXECUTABLE_NAME} PRIVATE ${MSGPACK_INCLUDE_DIRS})
+
 # Optional ROS2 support for main executable and tests
 if(rclcpp_FOUND AND std_msgs_FOUND)
   # Load ROS2 configuration (handles both main executable and tests)
   include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/ROS2.cmake)
   
-  # Add ROS2 support to main executable (requires msgpack)
-  target_include_directories(${EXECUTABLE_NAME} PRIVATE ${ROS2_INCLUDE_DIRS} ${MSGPACK_INCLUDE_DIRS})
+  # Add ROS2 support to main executable
+  target_include_directories(${EXECUTABLE_NAME} PRIVATE ${ROS2_INCLUDE_DIRS})
   target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${ROS2_LIBS} pthread)
   target_compile_definitions(${EXECUTABLE_NAME} PRIVATE HAS_ROS2=1)
   

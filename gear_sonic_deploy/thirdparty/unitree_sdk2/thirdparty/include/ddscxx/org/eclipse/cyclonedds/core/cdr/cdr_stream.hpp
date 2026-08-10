@@ -20,6 +20,7 @@
 #include <stdexcept>
 #include <stack>
 #include <cassert>
+#include <cstring>
 #include <dds/core/macros.hpp>
 
 namespace org {

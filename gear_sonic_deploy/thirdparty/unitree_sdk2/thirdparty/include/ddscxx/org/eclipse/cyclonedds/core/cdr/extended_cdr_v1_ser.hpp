@@ -28,6 +28,10 @@ namespace cdr {
  */
 class OMG_DDS_API xcdr_v1_stream : public cdr_stream {
 public:
+  // Bring base class methods into scope for template instantiation
+  using cdr_stream::position;
+  using cdr_stream::incr_position;
+
   /**
    * @brief
    * Constructor.

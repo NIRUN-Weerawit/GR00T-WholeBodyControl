@@ -239,6 +239,26 @@ target_include_directories(${PROJECT_NAME}
 # Link to unitree_sdk2 which includes all necessary dependencies
 target_link_libraries(${PROJECT_NAME} INTERFACE unitree_sdk2)
 
+add_compile_options(-fpermissive)
+
+# TensorRT paths inside container
+set(TENSORRT_INCLUDE_DIR /opt/TensorRT/include/x86_64-linux-gnu)
+set(TENSORRT_LIB_DIR /opt/TensorRT/lib/x86_64-linux-gnu)
+
+if(TARGET TRTInference)
+	target_include_directories(TRTInference PUBLIC
+	    /opt/TensorRT/include/x86_64-linux-gnu
+	)
+
+	target_link_directories(TRTInference PUBLIC
+	    /opt/TensorRT/lib/x86_64-linux-gnu
+	)
+
+	target_link_libraries(TRTInference
+	    nvinfer
+	)
+endif()
+
 # Examples
 if(BUILD_SRCS)
   add_subdirectory(src)
