@@ -4,6 +4,17 @@
 
 cd "$(dirname "$0")"
 
+# The executable was built on the host, so its embedded RUNPATH contains the
+# host checkout path. In Docker this repository is mounted at /workspace,
+# therefore make the vendored CycloneDDS libraries discoverable explicitly.
+DEPLOY_ROOT="$(pwd)"
+DDS_LIB_DIR="$DEPLOY_ROOT/thirdparty/unitree_sdk2/thirdparty/lib/$(uname -m)"
+if [[ ! -f "$DDS_LIB_DIR/libddsc.so.0" ]]; then
+    echo "ERROR: vendored CycloneDDS library is missing: $DDS_LIB_DIR/libddsc.so.0" >&2
+    exit 1
+fi
+export LD_LIBRARY_PATH="$DDS_LIB_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
 # Configuration
 TARGET="lo"
 CHECKPOINT_DECODER="policy/release/model_decoder.onnx"

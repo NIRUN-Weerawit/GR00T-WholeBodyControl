@@ -33,6 +33,7 @@ docker run -it --rm \
     --gpus all \
     --network host \
     -v $(pwd):/workspace/g1_deploy \
+    -e LD_LIBRARY_PATH=/workspace/g1_deploy/thirdparty/unitree_sdk2/thirdparty/lib/x86_64 \
     --name g1-zmq \
     g1-deploy-tensorrt10:latest \
     bash -c "source /opt/ros/humble/setup.bash && cd /workspace/g1_deploy && ./target/release/g1_deploy_onnx_ref lo policy/release/model_decoder.onnx reference/example/ \
