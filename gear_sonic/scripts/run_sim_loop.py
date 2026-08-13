@@ -29,6 +29,11 @@ class SimWrapper:
         # Keeping their configuration here makes the same sensors available to
         # the ZMQ publisher and any downstream recorder.
         camera_configs = {
+            "ego_view": {
+                "height": 480,
+                "width": 640,
+                "mjcf_name": "head_camera",
+            },
             "teleop_front": {
                 "width": config["CAMERA_WIDTH"],
                 "height": config["CAMERA_HEIGHT"],
