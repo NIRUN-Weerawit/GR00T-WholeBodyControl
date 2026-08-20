@@ -1,7 +1,10 @@
 """Tests for the swing-episode replayer (protocol v3 pose stream)."""
 
 import os
+import subprocess
+import sys
 import tempfile
+import threading
 import time
 import unittest
 
@@ -11,12 +14,15 @@ import zmq
 from gear_sonic.scripts.run_swing_episode_replayer import (
     G1_L_WRIST_YAW_IDX,
     G1_R_WRIST_YAW_IDX,
+    SwingEpisodeReplayer,
     build_pose_message,
+    discover_episode_paths,
     load_episode,
 )
 from gear_sonic.scripts.run_swing_episode_recorder import unpack_pose_message
 
 HEADER_SIZE = 1280
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 
 def make_episode_npz(save_path: str, T: int = 6) -> None:
@@ -33,6 +39,60 @@ def make_episode_npz(save_path: str, T: int = 6) -> None:
         "recording_seconds": np.array([2.0], dtype=np.float64),
     }
     np.savez_compressed(save_path, **arrays)
+
+
+class EpisodeDiscoveryTest(unittest.TestCase):
+    def test_recursively_discovers_episodes_in_natural_run_order(self):
+        with tempfile.TemporaryDirectory() as data_dir:
+            run_2 = os.path.join(data_dir, "run_2")
+            run_10 = os.path.join(data_dir, "run_10")
+            os.mkdir(run_2)
+            os.mkdir(run_10)
+            first = os.path.join(run_2, "forehand_right_000000.npz")
+            second = os.path.join(run_2, "forehand_right_000002.npz")
+            third = os.path.join(run_10, "backhand_left_000000.npz")
+            for path in (first, second, third):
+                make_episode_npz(path)
+            with open(os.path.join(data_dir, "notes.txt"), "w", encoding="utf-8") as handle:
+                handle.write("not an episode")
+
+            paths = discover_episode_paths(data_dir)
+
+            self.assertEqual(paths, [first, second, third])
+
+    def test_episode_selection_wraps_and_stops_active_replay(self):
+        with tempfile.TemporaryDirectory() as data_dir:
+            first = os.path.join(data_dir, "episode_0.npz")
+            second = os.path.join(data_dir, "episode_1.npz")
+            make_episode_npz(first, T=3)
+            make_episode_npz(second, T=5)
+
+            # Avoid opening a real ZMQ socket: selection is independent of transport.
+            player = object.__new__(SwingEpisodeReplayer)
+            player.replaying = True
+            player.frame_idx = 99
+            player.episode_paths = []
+            player.episode_cursor = 0
+            player.set_episode_library([first, second])
+            player.select_episode(-1)
+
+            self.assertFalse(player.replaying)
+            self.assertEqual(player.episode_cursor, 1)
+            self.assertEqual(player.ep["T"], 5)
+            self.assertEqual(player.frame_idx, 0)
+
+    def test_replay_fps_adjustment_uses_five_hz_steps_and_floor(self):
+        player = object.__new__(SwingEpisodeReplayer)
+        player.fps = 30
+        player.frame_period = 1.0 / player.fps
+
+        player.adjust_fps(5)
+        self.assertEqual(player.fps, 35)
+        self.assertAlmostEqual(player.frame_period, 1.0 / 35)
+
+        player.adjust_fps(-100)
+        self.assertEqual(player.fps, 5)
+        self.assertAlmostEqual(player.frame_period, 0.2)
 
 
 class LoadEpisodeTest(unittest.TestCase):
@@ -148,6 +208,145 @@ def _dtype_str(dt):
 def _astype(dt):
     dt = np.dtype(dt)
     return np.float32 if dt == np.float64 else dt
+
+
+def _command_payload(msg: bytes) -> bytes:
+    """Extract the 3-byte [start, stop, planner] payload from a command message.
+
+    Layout: topic (7 bytes, 'command') + 1280-byte header + 3-byte payload.
+    """
+    topic_end = msg.index(b"{")
+    return msg[topic_end + HEADER_SIZE : topic_end + HEADER_SIZE + 3]
+
+
+class ReplayerCommandFirstTest(unittest.TestCase):
+    """Regression: the replayer must send the TWO-STEP command sequence BEFORE
+    the pose stream, so the C++ deploy actually enters CONTROL state.
+
+    Root cause (zmq_manager.hpp): command(start=True) is only consumed in
+    PLANNER mode (handlePlannerInput). In STREAMED_MOTION mode the start flag is
+    dropped. So the deploy must first be told PLANNER+start (enters CONTROL),
+    then switched to STREAMED_MOTION (keeps running policy on the pose stream).
+    Sending command(start=True, planner=False) directly leaves the deploy in
+    WAIT_FOR_CONTROL -> the robot falls.
+
+    Expected sequence:
+      1. command [start=1, stop=0, planner=1]  (PLANNER + start policy)
+      2. command [start=1, stop=0, planner=0]  (switch to STREAMED_MOTION)
+      3. pose frames...
+    """
+
+    def _run_replayer_auto(self, npz_path: str, port: int, duration: float = 2.0):
+        received = []
+        stop_evt = threading.Event()
+        sub_ctx = zmq.Context()
+        sub = sub_ctx.socket(zmq.SUB)
+        sub.setsockopt_string(zmq.SUBSCRIBE, "")
+        sub.setsockopt(zmq.RCVTIMEO, 100)
+        sub.connect(f"tcp://127.0.0.1:{port}")
+        time.sleep(0.3)
+
+        def recv_loop():
+            while not stop_evt.is_set():
+                try:
+                    msg = sub.recv()
+                except zmq.Again:
+                    continue
+                received.append(msg)
+
+        t = threading.Thread(target=recv_loop, daemon=True)
+        t.start()
+
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                os.path.join(REPO_ROOT, "gear_sonic/scripts/run_swing_episode_replayer.py"),
+                "--npz", npz_path,
+                "--zmq-host", "127.0.0.1",
+                "--zmq-port", str(port),
+                "--fps", "30",
+                "--auto",
+            ],
+            cwd=REPO_ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        try:
+            time.sleep(duration)
+        finally:
+            proc.terminate()
+            try:
+                proc.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.communicate()
+            stop_evt.set()
+            t.join(timeout=1.0)
+            sub.close(0)
+            sub_ctx.term()
+            os.remove(npz_path)
+        return received
+
+    def _free_port(self) -> int:
+        probe = zmq.Context()
+        probe_sock = probe.socket(zmq.PUB)
+        port = probe_sock.bind_to_random_port("tcp://127.0.0.1")
+        probe_sock.close(0)
+        probe.term()
+        return port
+
+    def test_command_precedes_pose(self):
+        port = self._free_port()
+        _, npz_path = tempfile.mkstemp(suffix=".npz")
+        os.remove(npz_path)
+        make_episode_npz(npz_path, T=6)
+
+        received = self._run_replayer_auto(npz_path, port)
+
+        from collections import Counter
+
+        topics = [m[: m.index(b"{")] for m in received]
+        counts = Counter(topics)
+        self.assertGreaterEqual(counts.get(b"command", 0), 1, "no command message sent")
+        self.assertGreaterEqual(counts.get(b"pose", 0), 1, "no pose messages sent")
+        # The very first message must be the command (mode switch), not a pose frame.
+        self.assertEqual(topics[0], b"command", "command must precede the pose stream")
+
+    def test_two_step_command_sequence(self):
+        """The fix: PLANNER+start command must come BEFORE the STREAMED_MOTION
+        command, and both must precede the pose stream."""
+        port = self._free_port()
+        _, npz_path = tempfile.mkstemp(suffix=".npz")
+        os.remove(npz_path)
+        make_episode_npz(npz_path, T=6)
+
+        received = self._run_replayer_auto(npz_path, port)
+
+        commands = [m for m in received if m[: m.index(b"{")] == b"command"]
+        poses = [m for m in received if m[: m.index(b"{")] == b"pose"]
+        self.assertGreaterEqual(len(commands), 2, "expected at least two command messages")
+
+        # First command: PLANNER + start  -> [start=1, stop=0, planner=1]
+        self.assertEqual(
+            list(_command_payload(commands[0])),
+            [1, 0, 1],
+            "first command must be PLANNER+start to enter CONTROL state",
+        )
+        # Second command: STREAMED_MOTION  -> [start=1, stop=0, planner=0]
+        self.assertEqual(
+            list(_command_payload(commands[1])),
+            [1, 0, 0],
+            "second command must switch to STREAMED_MOTION",
+        )
+        # Both commands must precede any pose frame.
+        first_pose_idx = received.index(poses[0])
+        last_command_idx = max(i for i, m in enumerate(received) if m[: m.index(b"{")] == b"command")
+        self.assertLess(
+            last_command_idx,
+            first_pose_idx,
+            "both command messages must precede the pose stream",
+        )
 
 
 if __name__ == "__main__":

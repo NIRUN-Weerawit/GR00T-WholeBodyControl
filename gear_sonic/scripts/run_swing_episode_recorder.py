@@ -8,18 +8,27 @@ protocol of ``run_data_exporter.py``:
   - ZMQ SUB on ``pose``, ``planner``, ``manager_state`` at ``:5556``
   - frames unpacked with ``unpack_pose_message`` (1280-byte JSON header +
     concatenated little-endian fields)
-  - ``EpisodeState`` machine: IDLE -> RECORDING -> NEED_TO_SAVE -> IDLE, plus abort
+  - a two-state recorder: IDLE -> RECORDING -> IDLE; Left-Grip+A starts,
+    and the next Left-Grip+A stops and saves immediately
   - recording controls from ``manager_state``: ``toggle_data_collection``
     (Left-Grip+A) toggle start/save, ``toggle_data_abort`` (Left-Grip+B) discard.
     An optional keyboard fallback (``c``/``x``, reuse ``run_recording_keyboard.py``
     on port 5580) is also supported.
 
 Output difference vs ``run_data_exporter.py``: writes ONE labeled ``.npz`` per
-episode instead of the lerobot parquet + MP4 layout.
+episode instead of the lerobot parquet + MP4 layout. Every invocation creates a
+fresh ``run_N`` directory under ``--output-dir`` (default: ``swing_episodes``).
 
 Runs standalone: no MuJoCo, no deployment binary, no camera server, no Remote
 Vision. PICO body tracking (``pico_manager_thread_server.py --manager``) is the
 only required source, publishing ``pose`` / ``manager_state`` on ``:5556``.
+
+IMPORTANT: the manager must be in POSE mode for pose frames to be published.
+It starts in StreamMode.OFF (manager_state only). Flow:
+  1. A+B+X+Y (start combo) -> PLANNER (calibrates VR 3pt in zero-ref pose)
+  2. A+X                   -> POSE (pose frames now stream)
+Recording while not in POSE mode captures zero frames and the episode is
+discarded with a warning.
 
 Usage (from repo root):
     source .venv_data_collection/bin/activate
@@ -33,6 +42,8 @@ from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
 import json
+from pathlib import Path
+import re
 import threading
 import time
 
@@ -44,11 +55,48 @@ from gear_sonic.utils.data_collection.episode_state import EpisodeState
 from gear_sonic.utils.data_collection.keyboard_subscriber import ZMQKeyboardSubscriber
 
 
+_RUN_DIR_PATTERN = re.compile(r"run_(\d+)$")
+
+
+def create_run_output_dir(output_root: str) -> str:
+    """Create and return the next numbered ``run_N`` directory under a root.
+
+    The mkdir loop makes an invocation collision-safe: if another recorder creates
+    the candidate first, this recorder simply retries with the next number.
+    """
+    root = Path(output_root)
+    root.mkdir(parents=True, exist_ok=True)
+    existing_indices = [
+        int(match.group(1))
+        for child in root.iterdir()
+        if child.is_dir() and (match := _RUN_DIR_PATTERN.fullmatch(child.name))
+    ]
+    next_index = max(existing_indices, default=0) + 1
+
+    while True:
+        run_dir = root / f"run_{next_index}"
+        try:
+            run_dir.mkdir()
+            return str(run_dir)
+        except FileExistsError:
+            next_index += 1
+
+
 # ---------------------------------------------------------------------------
 # Wire protocol (mirrors run_data_exporter.py's unpack_pose_message)
 # ---------------------------------------------------------------------------
 
 POSE_HEADER_SIZE = 1280
+
+# StreamMode values from pico_manager_thread_server.StreamMode.
+STREAM_MODE_NAMES = {
+    0: "OFF",
+    1: "POSE",
+    2: "PLANNER",
+    3: "PLANNER_FROZEN_UPPER_BODY",
+    4: "POSE_PAUSE",
+    5: "PLANNER_VR_3PT",
+}
 
 
 def unpack_pose_message(packed_data: bytes, topic: str = "pose") -> dict:
@@ -122,7 +170,7 @@ class SwingRecorderConfig:
     """Primitive label written into each episode file (default forehand_right)."""
 
     output_dir: str = "swing_episodes"
-    """Directory to write labeled episode npz files."""
+    """Parent directory; each invocation creates a fresh numbered ``run_N`` inside it."""
 
     zmq_host: str = "localhost"
     """ZMQ host for Sonic SMPL pose / manager_state messages."""
@@ -185,6 +233,11 @@ class SwingEpisodeRecorder:
 
         self._manager_toggle_dc = False
         self._manager_toggle_da = False
+
+        # Track the manager's StreamMode so we can warn before the user
+        # records an empty episode (pose frames only stream in POSE mode).
+        self._stream_mode = None
+        self._warned_not_pose = False
 
         # Per-episode buffers.
         self._buffers = {key: [] for key in _REPLAY_KEYS}
@@ -252,16 +305,18 @@ class SwingEpisodeRecorder:
             self._manager_toggle_dc = False
 
         if key == "c":
-            self._episode_state.change_state()
-            if self._episode_state.get_state() == self._episode_state.RECORDING:
+            state = self._episode_state.get_state()
+            if state == self._episode_state.IDLE:
+                self._episode_state.change_state()
                 self._episode_start_ns = time.monotonic()
                 print(f"[Recorder] Started episode {self.episode_index}")
-            elif self._episode_state.get_state() == self._episode_state.NEED_TO_SAVE:
-                print("[Recorder] Stopping recording, preparing to save")
-            elif self._episode_state.get_state() == self._episode_state.IDLE:
-                self.save_episode()
-                self.episode_index += 1
-                print("[Recorder] Saved episode and back to idle")
+            elif state == self._episode_state.RECORDING:
+                # This standalone recorder has no review/annotation stage, so
+                # one second toggle deliberately means stop *and* save.
+                if self.save_episode():
+                    self.episode_index += 1
+                    print("[Recorder] Saved episode and back to idle")
+                self._episode_state.reset_state()
         elif key == "x":
             if self._episode_state.get_state() == self._episode_state.RECORDING:
                 self.discard_episode()
@@ -274,6 +329,19 @@ class SwingEpisodeRecorder:
             data = unpack_pose_message(raw, topic="manager_state")
         except Exception:
             return
+
+        if "stream_mode" in data:
+            self._stream_mode = int(data["stream_mode"].flat[0])
+            if self._stream_mode != 1 and not self._warned_not_pose:
+                self._warned_not_pose = True
+                mode_name = STREAM_MODE_NAMES.get(self._stream_mode, str(self._stream_mode))
+                print(
+                    f"[Recorder] WARNING: manager is in StreamMode.{mode_name} - pose "
+                    "frames are only published in POSE mode. Press A+B+X+Y then A+X on "
+                    "the PICO to enter POSE mode, or episodes will be empty."
+                )
+            elif self._stream_mode == 1:
+                self._warned_not_pose = False
 
         if self._extract_bool(data, "toggle_data_collection"):
             self._manager_toggle_dc = True
@@ -378,9 +446,25 @@ class SwingEpisodeRecorder:
 
     # -- episode save / discard --
 
-    def save_episode(self) -> None:
-        """Assemble and write one labeled npz for the just-finished episode."""
+    def save_episode(self) -> bool:
+        """Assemble and write one labeled npz for the just-finished episode.
+
+        Returns True if a file was written, False if the episode had no pose
+        frames (typically because the manager was not in POSE mode).
+        """
         import os
+
+        n_frames = len(self._buffers["smpl_joints"])
+        if n_frames == 0:
+            mode_name = STREAM_MODE_NAMES.get(self._stream_mode or 0, "unknown")
+            print(
+                f"[Recorder] WARNING: no pose frames captured (manager StreamMode="
+                f"{mode_name}) - discarding empty episode. Enter POSE mode (A+X) and "
+                "record again."
+            )
+            self._clear_buffers()
+            self._episode_start_ns = None
+            return False
 
         os.makedirs(self.output_dir, exist_ok=True)
         path = os.path.join(self.output_dir, self.filename())
@@ -401,10 +485,10 @@ class SwingEpisodeRecorder:
 
         np.savez_compressed(path, **arrays)
 
-        n_frames = len(self._buffers["smpl_joints"])
         print(f"[Recorder] Saved {path} ({n_frames} frames)")
         self._clear_buffers()
         self._episode_start_ns = None
+        return True
 
     def discard_episode(self) -> None:
         """Discard current episode buffers without writing."""
@@ -444,10 +528,12 @@ class SwingEpisodeRecorder:
 
 def main() -> None:
     config = tyro.cli(SwingRecorderConfig)
+    run_output_dir = create_run_output_dir(config.output_dir)
+    print(f"[Recorder] Created run directory: {run_output_dir}")
     recorder = SwingEpisodeRecorder(
         zmq_host=config.zmq_host,
         zmq_port=config.zmq_port,
-        output_dir=config.output_dir,
+        output_dir=run_output_dir,
         primitive=config.primitive,
         keyboard_fallback=config.keyboard_fallback,
         keyboard_port=config.keyboard_port,

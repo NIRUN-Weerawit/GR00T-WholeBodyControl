@@ -15,6 +15,7 @@ import zmq
 
 from gear_sonic.scripts.run_swing_episode_recorder import (
     SwingEpisodeRecorder,
+    create_run_output_dir,
     unpack_pose_message,
 )
 
@@ -88,6 +89,21 @@ def _send_toggle(pub, collection=True, abort=False):
     time.sleep(0.15)
 
 
+class RunOutputDirectoryTest(unittest.TestCase):
+    def test_creates_next_numbered_run_directory(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as base_dir:
+            os.mkdir(os.path.join(base_dir, "run_1"))
+            os.mkdir(os.path.join(base_dir, "run_3"))
+            os.mkdir(os.path.join(base_dir, "notes"))
+
+            run_dir = create_run_output_dir(base_dir)
+
+            self.assertEqual(run_dir, os.path.join(base_dir, "run_4"))
+            self.assertTrue(os.path.isdir(run_dir))
+
+
 class _ZMQHarness(unittest.TestCase):
     def setUp(self):
         self.ctx = zmq.Context()
@@ -122,11 +138,7 @@ class _ZMQHarness(unittest.TestCase):
         return rec, thread
 
     def _drive_episode(self, primitive="forehand_right", n_send=10):
-        """Press start, feed frames, press stop+save; return npz path.
-
-        EpisodeState cycles per press: IDLE->RECORDING (press 1),
-        RECORDING->NEED_TO_SAVE (press 2), NEED_TO_SAVE->IDLE + save (press 3).
-        """
+        """Press start, feed frames, then press once more to stop and save."""
         rec, thread = self._start_recorder(primitive)
         try:
             # Press 1: start recording (IDLE -> RECORDING).
@@ -137,13 +149,7 @@ class _ZMQHarness(unittest.TestCase):
                 self.pub.send(pack_pose_message(make_pose_frame(i), topic="pose"))
                 time.sleep(0.05)
 
-            # Press 2: stop (RECORDING -> NEED_TO_SAVE).
-            _send_toggle(self.pub)
-            deadline = time.monotonic() + 2.0
-            while time.monotonic() < deadline and rec._episode_state.get_state() != "need_to_save":
-                time.sleep(0.05)
-
-            # Press 3: save (NEED_TO_SAVE -> IDLE), writes the npz.
+            # Press 2: stop and save immediately (RECORDING -> IDLE + save).
             _send_toggle(self.pub)
 
             deadline = time.monotonic() + 3.0
