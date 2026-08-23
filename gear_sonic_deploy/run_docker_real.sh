@@ -7,7 +7,7 @@
 #
 # Architecture:
 #   INPUT:  PICO 4 → XRoboToolkit SDK → ZMQ (5556) → g1_deploy_onnx_ref
-#   OUTPUT: g1_deploy_onnx_ref → ROS2 → DDS → G1 Robot (Unitree SDK2)
+#   OUTPUT: g1_deploy_onnx_ref → ROS2/DDS → G1 Robot, plus ZMQ action output
 #
 # Prerequisites:
 #   1. XRoboToolkit PC Service installed and running
@@ -266,7 +266,7 @@ echo -e "${CYAN}═════════════════════�
 echo ""
 echo -e "${BLUE}Architecture:${NC}"
 echo -e "  ${GREEN}INPUT:${NC}  PICO 4 → XRoboToolkit SDK → ZMQ:${ZMQ_PORT} → g1_deploy_onnx_ref"
-echo -e "  ${GREEN}OUTPUT:${NC} g1_deploy_onnx_ref → ROS2 → DDS → G1 Robot (Unitree SDK2)"
+echo -e "  ${GREEN}OUTPUT:${NC} g1_deploy_onnx_ref → ROS2/DDS → G1 Robot, plus ZMQ action output"
 echo ""
 
 # ============================================================================
@@ -324,7 +324,7 @@ docker run -it --rm \
         --input-type zmq_manager \
         --zmq-host ${ZMQ_HOST} \
         --zmq-port ${ZMQ_PORT} \
-        --output-type ros2 \
+        --output-type all \
         --verbose \
         --zmq-verbose \
         --enable-motion-recording \
@@ -332,6 +332,6 @@ docker run -it --rm \
 
 # Note: For real robot:
 #   --input-type zmq_manager → Receives VR commands from PICO via ZMQ
-#   --output-type ros2        → Sends joint commands to robot via DDS (Unitree SDK2)
+#   --output-type all         → Sends joint commands via ROS2/DDS and publishes ZMQ actions
 #   NO --disable-crc-check   → Safety CRC validation enabled
 #   --privileged             → Required for real-time scheduling
