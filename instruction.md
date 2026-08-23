@@ -16,18 +16,6 @@ Recorded .npz episode
   -> physical G1 low-level motor commands
 ```
 
-Use the **real-robot launcher**:
-
-```bash
-./gear_sonic_deploy/run_docker_real.sh
-```
-
-For MuJoCo deployment use 
-```bash
-./gear_sonic_deploy/run_docker_zmq.sh
-```
-`run_docker_zmq.sh` uses loopback (`lo`) and ZMQ-only action output for MuJoCo.
-
 ---
 
 ## 2. Required environments
