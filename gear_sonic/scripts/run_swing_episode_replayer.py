@@ -35,9 +35,10 @@ INTERACTIVE MODE (default) — keyboard controls (single char, non-blocking):
   [ / b   Select previous episode (stops replay before switching)
   ] / n   Select next episode (stops replay before switching)
   i       Print selected episode status
-  p   Enter PLANNER mode + start policy   (command start=True,  planner=True)
-  m   Switch to STREAMED_MOTION (POSE)    (command start=True,  planner=False)
-  r   Start selected episode from frame 0
+  f       Toggle selected full-body SMPL / upper-body VR-3-point replay type
+  p       Enter PLANNER mode + start policy
+  m       Activate selected mode (STREAMED_MOTION for full body; PLANNER for upper body)
+  r       Start selected episode from frame 0
   s   Stop replay
   l   Toggle looping for the selected episode
   ↑/↓ Increase/decrease replay rate by 5 Hz (minimum 5 Hz)
@@ -79,6 +80,7 @@ import zmq
 
 from gear_sonic.utils.teleop.zmq.zmq_planner_sender import (
     build_command_message,
+    build_planner_message,
     pack_pose_message,
 )
 
@@ -172,7 +174,46 @@ def load_episode(npz: str) -> dict:
         out["T"] = len(out["smpl_pose"])
         if out["T"] == 0:
             raise ValueError("episode has no frames")
+        out["upper_body_available"] = False
+        if "vr_3pt_position" in data and "vr_3pt_orientation" in data:
+            vr_position = np.asarray(data["vr_3pt_position"], dtype=np.float32)
+            vr_orientation = np.asarray(data["vr_3pt_orientation"], dtype=np.float32)
+            if (
+                vr_position.shape == (out["T"], 9)
+                and vr_orientation.shape == (out["T"], 12)
+                and np.isfinite(vr_position).all()
+                and np.isfinite(vr_orientation).all()
+            ):
+                out["vr_3pt_position"] = vr_position
+                out["vr_3pt_orientation"] = vr_orientation
+                out["upper_body_available"] = True
+        out["recorded_fps"] = None
+        if "timestamp_realtime" in data:
+            timestamps = np.asarray(data["timestamp_realtime"], dtype=np.float64).reshape(-1)
+            timestamps = timestamps[np.isfinite(timestamps)]
+            if timestamps.size >= 2:
+                span_seconds = float(timestamps[-1] - timestamps[0])
+                if span_seconds > 0.0:
+                    out["recorded_fps"] = (timestamps.size - 1) / span_seconds
     return out
+
+
+def build_upper_body_planner_message(ep: dict, t: int) -> bytes:
+    """Encode recorded VR head/wrist targets as an idle planner command.
+
+    Planner/VR-3-point mode keeps locomotion at ``IDLE`` while the deploy maps
+    the recorded left wrist, right wrist, and head targets into upper-body
+    control.  It is intentionally distinct from protocol-v3 SMPL pose replay.
+    """
+    return build_planner_message(
+        mode=0,  # LocomotionMode.IDLE
+        movement=(0.0, 0.0, 0.0),
+        facing=(1.0, 0.0, 0.0),
+        speed=-1.0,
+        height=-1.0,
+        vr_3pt_position=ep["vr_3pt_position"][t].astype(np.float32),
+        vr_3pt_orientation=ep["vr_3pt_orientation"][t].astype(np.float32),
+    )
 
 
 def build_pose_message(ep: dict, t: int) -> dict:
@@ -219,8 +260,9 @@ class SwingEpisodeReplayer:
         self.sock = self.ctx.socket(zmq.PUB)
         self.sock.setsockopt(zmq.LINGER, 0)
         self.sock.bind(self.endpoint)
-        print(f"[Replayer] Publishing 'pose' (protocol v3) to {self.endpoint} @ {fps} Hz")
+        print(f"[Replayer] Publishing episode control messages (protocol v3) to {self.endpoint} @ {fps} Hz")
         time.sleep(0.3)  # subscriber handshake
+        self.control_mode = "full_body"
         self.replaying = False
         self.frame_idx = 0
         self.ep: dict | None = None
@@ -256,7 +298,7 @@ class SwingEpisodeReplayer:
         if not ready:
             return "ESC"
         suffix = os.read(self._stdin_fd, 2)
-        return {b"[A": "UP", b"[B": "DOWN"}.get(suffix, "ESC")
+        return {b"[A": "UP", b"[B": "DOWN", b"[C": "RIGHT", b"[D": "LEFT"}.get(suffix, "ESC")
 
     def adjust_fps(self, delta_hz: int) -> None:
         """Update live replay pacing, enforcing a safe 5 Hz lower bound."""
@@ -278,9 +320,15 @@ class SwingEpisodeReplayer:
         path = self.episode_paths[self.episode_cursor]
         self.ep = load_episode(path)
         self.frame_idx = 0
+        recorded_rate = self.ep["recorded_fps"]
+        recorded_rate_text = (
+            f", recorded {recorded_rate:.1f} Hz"
+            if recorded_rate is not None
+            else ", recorded rate unavailable"
+        )
         print(
             f"[Replayer] Selected {self.episode_cursor + 1}/{len(self.episode_paths)}: "
-            f"{path} ({self.ep['T']} frames)"
+            f"{path} ({self.ep['T']} frames{recorded_rate_text})"
         )
 
     def select_episode(self, step: int) -> None:
@@ -294,11 +342,15 @@ class SwingEpisodeReplayer:
 
     def print_selected_episode(self) -> None:
         assert self.ep is not None
-        duration = self.ep["T"] * self.frame_period
+        recorded_rate = self.ep["recorded_fps"]
+        recorded_text = f"{recorded_rate:.1f} Hz" if recorded_rate is not None else "unavailable"
         print(
             f"[Replayer] Episode {self.episode_cursor + 1}/{len(self.episode_paths)} | "
             f"{self.episode_paths[self.episode_cursor]} | {self.ep['T']} frames | "
-            f"{duration:.2f} s @ {1.0 / self.frame_period:.0f} Hz | "
+            f"recorded={recorded_text}"
+        )
+        print(
+            f"           replay={1.0 / self.frame_period:.0f} Hz | mode={self.control_mode} | "
             f"loop={'on' if self.loop else 'off'}"
         )
 
@@ -329,6 +381,46 @@ class SwingEpisodeReplayer:
         print("[Replayer] -> STREAMED_MOTION (POSE) mode  (command start=True, planner=False)")
         print("           [watch deploy log for: 'Switched to: STREAMED MOTION mode']")
 
+    def toggle_control_mode(self) -> None:
+        """Toggle the selected replay type without sending any deploy command."""
+        self.control_mode = (
+            "upper_body" if self.control_mode == "full_body" else "full_body"
+        )
+        print(f"[Replayer] Selected control mode: {self.control_mode}")
+
+    def _send_upper_body_frame(self, t: int) -> None:
+        assert self.ep is not None
+        self.sock.send(build_upper_body_planner_message(self.ep, t))
+
+    def activate_selected_control_mode(self) -> None:
+        """Apply the selected mode after ``p`` has started policy/planner control."""
+        self.stop_replay()
+        if self.control_mode == "full_body":
+            # Clear any VR-3-point capability latched by a prior upper-body run
+            # before handing control to protocol-v3 SMPL streamed motion.
+            self.sock.send(
+                build_planner_message(
+                    mode=0,
+                    movement=(0.0, 0.0, 0.0),
+                    facing=(1.0, 0.0, 0.0),
+                    speed=-1.0,
+                    height=-1.0,
+                )
+            )
+            self.enter_streamed_motion()
+            print("[Replayer] FULL-BODY mode active: replay sends protocol-v3 SMPL pose frames")
+            return
+        if self.ep is None or not self.ep["upper_body_available"]:
+            print("[Replayer] UPPER-BODY mode unavailable: episode lacks valid VR 3-point targets")
+            return
+        # VR-3-point is a planner input, not a streamed-motion input. Preload its
+        # first target before switching, matching the live PICO manager ordering.
+        # Teleop encoder mode also needs a planner-generated lower-body reference,
+        # so upper-body replay must remain in PLANNER rather than STREAMED_MOTION.
+        self._send_upper_body_frame(0)
+        self.enter_planner_start()
+        print("[Replayer] UPPER-BODY mode active: PLANNER provides lower-body reference and VR 3-point targets")
+
     def emergency_stop(self) -> None:
         """Step 3: emergency stop (like 'O')."""
         self._send_command(start=False, stop=True, planner=True)
@@ -344,7 +436,10 @@ class SwingEpisodeReplayer:
             return
         self.replaying = True
         self.frame_idx = 0
-        print(f"[Replayer] REPLAY START  ({self.ep['T']} frames @ {1.0 / self.frame_period:.0f} Hz)")
+        print(
+            f"[Replayer] REPLAY START  ({self.ep['T']} frames @ {1.0 / self.frame_period:.0f} Hz, "
+            f"mode={self.control_mode})"
+        )
 
     def stop_replay(self) -> None:
         self.replaying = False
@@ -360,9 +455,12 @@ class SwingEpisodeReplayer:
                 self.replaying = False
                 print("[Replayer] Episode finished")
                 return
-        fields = build_pose_message(self.ep, self.frame_idx)
-        packed = pack_pose_message(fields, topic=self.topic, version=3)
-        self.sock.send(packed)
+        if self.control_mode == "upper_body":
+            self._send_upper_body_frame(self.frame_idx)
+        else:
+            fields = build_pose_message(self.ep, self.frame_idx)
+            packed = pack_pose_message(fields, topic=self.topic, version=3)
+            self.sock.send(packed)
         self.frame_idx += 1
 
     # ------------------------------------------------------------------
@@ -372,12 +470,13 @@ class SwingEpisodeReplayer:
         self.set_episode_library(episode_paths, initial_index)
         print()
         print("=== Interactive swing replayer ===")
-        print("  [ / b   Previous episode (stops replay before switching)")
-        print("  ] / n   Next episode (stops replay before switching)")
+        print("  <- / b   Previous episode (stops replay before switching)")
+        print("  -> / n   Next episode (stops replay before switching)")
         print("  i       Print selected episode status")
+        print("  f       Toggle selected full-body SMPL / upper-body VR-3-point replay type")
         print("  p       Enter PLANNER mode + start policy")
-        print("  m       Switch to STREAMED_MOTION (POSE) mode")
-        print("  r       Start replay from frame 0")
+        print("  m       Activate selected mode (STREAMED_MOTION for full body; PLANNER for upper body)")
+        print("  r       Start selected episode from frame 0")
         print("  s       Stop replay")
         print("  l       Toggle loop for the selected episode")
         print("  ↑ / ↓   Increase / decrease replay rate by 5 Hz (minimum 5 Hz)")
@@ -385,8 +484,7 @@ class SwingEpisodeReplayer:
         print("  ?       Show this help")
         print("  q       Quit")
         print()
-        print("  Recommended sequence:  p  ->  m  ->  r")
-        print("  (PLANNER+start, then STREAMED_MOTION, then replay)")
+        print("  Sequence: p -> f (if upper body) -> m -> r. Default selection is full body.")
         print()
         self._enable_raw_stdin()
         next_frame_time = 0.0
@@ -401,16 +499,18 @@ class SwingEpisodeReplayer:
                         self.adjust_fps(-5)
                     elif key in ("q", "Q"):
                         break
-                    elif key in ("[", "b", "B"):
+                    elif key in ("LEFT", "b", "B"):
                         self.select_episode(-1)
-                    elif key in ("]", "n", "N"):
+                    elif key in ("RIGHT", "n", "N"):
                         self.select_episode(1)
                     elif key in ("i", "I"):
                         self.print_selected_episode()
+                    elif key in ("f", "F"):
+                        self.toggle_control_mode()
                     elif key in ("p", "P"):
                         self.enter_planner_start()
                     elif key in ("m", "M"):
-                        self.enter_streamed_motion()
+                        self.activate_selected_control_mode()
                     elif key in ("r", "R"):
                         self.start_replay()
                         next_frame_time = now
@@ -422,8 +522,9 @@ class SwingEpisodeReplayer:
                     elif key in ("o", "O"):
                         self.emergency_stop()
                     elif key in ("?", "h", "H"):
-                        print("  [/b=previous  ]/n=next  i=status  ↑/↓=rate±5Hz  p=PLANNER+start  "
-                              "m=STREAMED_MOTION  r=replay  s=stop  l=loop  o=estop  q=quit")
+                        print("  [/b=previous  ]/n=next  i=status  f=toggle full/upper body  "
+                              "p=PLANNER+start  m=activate selection  ↑/↓=rate±5Hz  "
+                              "r=replay  s=stop  l=loop  o=estop  q=quit")
                 # Send a frame if replaying and the frame period has elapsed.
                 if self.replaying and now >= next_frame_time:
                     self._send_one_frame()

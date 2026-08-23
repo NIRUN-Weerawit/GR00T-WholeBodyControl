@@ -16,6 +16,7 @@ from gear_sonic.scripts.run_swing_episode_replayer import (
     G1_R_WRIST_YAW_IDX,
     SwingEpisodeReplayer,
     build_pose_message,
+    build_upper_body_planner_message,
     discover_episode_paths,
     load_episode,
 )
@@ -25,7 +26,7 @@ HEADER_SIZE = 1280
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 
-def make_episode_npz(save_path: str, T: int = 6) -> None:
+def make_episode_npz(save_path: str, T: int = 6, recorded_fps: float | None = None) -> None:
     """Write a synthetic swing-episode npz matching the recorder schema."""
     arrays = {
         "smpl_pose": np.zeros((T, 21, 3), dtype=np.float32),
@@ -38,6 +39,10 @@ def make_episode_npz(save_path: str, T: int = 6) -> None:
         "episode_index": np.array([0], dtype=np.int32),
         "recording_seconds": np.array([2.0], dtype=np.float64),
     }
+    if recorded_fps is not None:
+        arrays["timestamp_realtime"] = (
+            1_000.0 + np.arange(T, dtype=np.float64) / recorded_fps
+        ).reshape(T, 1)
     np.savez_compressed(save_path, **arrays)
 
 
@@ -81,6 +86,40 @@ class EpisodeDiscoveryTest(unittest.TestCase):
             self.assertEqual(player.ep["T"], 5)
             self.assertEqual(player.frame_idx, 0)
 
+    def test_control_mode_toggle_changes_selection_without_sending_commands(self):
+        player = object.__new__(SwingEpisodeReplayer)
+        player.control_mode = "full_body"
+
+        player.toggle_control_mode()
+        self.assertEqual(player.control_mode, "upper_body")
+
+        player.toggle_control_mode()
+        self.assertEqual(player.control_mode, "full_body")
+
+    def test_upper_body_activation_preloads_target_then_enters_planner(self):
+        class Socket:
+            def __init__(self):
+                self.messages = []
+
+            def send(self, message):
+                self.messages.append(message)
+
+        player = object.__new__(SwingEpisodeReplayer)
+        player.sock = Socket()
+        player.replaying = False
+        player.control_mode = "upper_body"
+        player.ep = {
+            "upper_body_available": True,
+            "vr_3pt_position": np.zeros((1, 9), dtype=np.float32),
+            "vr_3pt_orientation": np.zeros((1, 12), dtype=np.float32),
+        }
+
+        player.activate_selected_control_mode()
+
+        topics = [message[: message.index(b"{")] for message in player.sock.messages]
+        self.assertEqual(topics, [b"planner", b"command"])
+        self.assertEqual(list(_command_payload(player.sock.messages[1])), [1, 0, 1])
+
     def test_replay_fps_adjustment_uses_five_hz_steps_and_floor(self):
         player = object.__new__(SwingEpisodeReplayer)
         player.fps = 30
@@ -107,6 +146,20 @@ class LoadEpisodeTest(unittest.TestCase):
             self.assertEqual(ep["smpl_joints"].shape, (5, 24, 3))
             self.assertEqual(ep["body_quat_w"].shape, (5, 4))
             self.assertEqual(ep["frame_index"].shape, (5, 1))
+            self.assertIsNone(ep["recorded_fps"])
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
+
+    def test_loads_timestamp_derived_recording_frequency(self):
+        _, path = tempfile.mkstemp(suffix=".npz")
+        os.remove(path)
+        try:
+            make_episode_npz(path, T=6, recorded_fps=75.0)
+
+            ep = load_episode(path)
+
+            self.assertAlmostEqual(ep["recorded_fps"], 75.0)
         finally:
             if os.path.exists(path):
                 os.remove(path)
@@ -122,6 +175,23 @@ class LoadEpisodeTest(unittest.TestCase):
         finally:
             if os.path.exists(path):
                 os.remove(path)
+
+
+class BuildUpperBodyPlannerMessageTest(unittest.TestCase):
+    def test_encodes_recorded_vr_targets_with_idle_locomotion(self):
+        ep = {
+            "vr_3pt_position": np.arange(18, dtype=np.float32).reshape(2, 9),
+            "vr_3pt_orientation": np.arange(24, dtype=np.float32).reshape(2, 12),
+        }
+
+        packed = build_upper_body_planner_message(ep, t=1)
+        data = unpack_pose_message(packed, topic="planner")
+
+        self.assertEqual(data["mode"].flat[0], 0)  # LocomotionMode.IDLE
+        np.testing.assert_array_equal(data["movement"], np.zeros(3, dtype=np.float32))
+        np.testing.assert_array_equal(data["facing"], np.array([1.0, 0.0, 0.0], dtype=np.float32))
+        np.testing.assert_array_equal(data["vr_position"], ep["vr_3pt_position"][1])
+        np.testing.assert_array_equal(data["vr_orientation"], ep["vr_3pt_orientation"][1])
 
 
 class BuildPoseMessageTest(unittest.TestCase):
