@@ -45,18 +45,6 @@ cd ~/GR00T-WholeBodyControl
 | Live PICO manager, if used instead of replay | `.venv_teleop` | XRoboToolkit / PICO dependencies |
 | MuJoCo only | `.venv_sim` | Not needed for a physical G1 run |
 
-For playback, activate only the collection venv in the replayer terminal:
-
-```bash
-source .venv_data_collection/bin/activate
-unset PYTHONPATH
-```
-
-*If you don't have `.venv_data_collection` yet, create with the following command:
-```bash
-bash install_scripts/install_data_collection.sh
-```
-
 ---
 
 ## 3. Mandatory hardware/network checks
@@ -196,14 +184,59 @@ Expected categories:
 
 ---
 
-## 8. Launch order: recorded full-body motion playback
+## 8. Launch order
+
+### 8.1 Test the desired behavior in MuJoCo before deploying on real G1 (Optional)
+
+*If you don't have `.venv_sim` yet, install MuJoCo environment using this command
+```bash
+cd ~/GR00T-WholeBodyControl
+bash install_scripts/install_mujoco_sim.sh 
+```
+### Terminal A — MuJoCo sim loop
+```bash
+cd ~/GR00T-WholeBodyControl
+source .venv_sim/bin/activate
+python3 gear_sonic/scripts/run_sim_loop.py   --enable-onscreen --enable-offscreen
+```
+
+### Terminal B — sim G1 deploy 
+```bash
+cd ~/GR00T-WholeBodyControl
+./gear_sonic_deploy/run_docker_zmq.sh
+```
+`run_docker_zmq.sh` uses loopback (`lo`) and ZMQ-only action output for MuJoCo.
+
+### Terminal C — recorded-episode replayer
+
+
+Wait until Terminal A finishes initialization and is listening on ZMQ port `5556`.
+
+```bash
+cd ~/GR00T-WholeBodyControl
+source .venv_data_collection/bin/activate
+unset PYTHONPATH
+
+python gear_sonic/scripts/run_swing_episode_replayer.py \
+  --data-dir swing_episodes/forehand_right \
+```
+
+The replayer binds ZMQ `:5556`; deploy subscribers connect to it.
+
+* If you don't have `.venv_data_collection` yet, create with the following command:
+```bash
+bash install_scripts/install_data_collection.sh
+```
+
+
+### 8.2 recorded full-body motion playback in real G1
 
 Use three terminals.
 
 ### Terminal A — real G1 deploy
 
 ```bash
-cd ~/Godot/GR00T-WholeBodyControl
+cd ~/GR00T-WholeBodyControl
 ./gear_sonic_deploy/run_docker_real.sh --interface <G1_WIRED_INTERFACE>
 ```
 
@@ -222,7 +255,7 @@ It uses host networking so DDS and ZMQ use the host network namespace.
 Wait until Terminal A finishes initialization and is listening on ZMQ port `5556`.
 
 ```bash
-cd ~/Godot/GR00T-WholeBodyControl
+cd ~/GR00T-WholeBodyControl
 source .venv_data_collection/bin/activate
 unset PYTHONPATH
 
