@@ -56,6 +56,96 @@ from gear_sonic.utils.data_collection.keyboard_subscriber import ZMQKeyboardSubs
 
 
 _RUN_DIR_PATTERN = re.compile(r"run_(\d+)$")
+SUMMARY_FILENAME = "dataset_summary.json"
+
+
+def _decode_scalar(value: np.ndarray, default: str = "") -> str:
+    """Return a UTF-8 string from a scalar/one-element NPZ array."""
+    if not value.size:
+        return default
+    item = value.flat[0]
+    if isinstance(item, bytes):
+        return item.decode("utf-8")
+    return str(item)
+
+
+def write_dataset_summary(output_dir: str) -> str:
+    """Write a compact JSON manifest for all saved episodes in ``output_dir``.
+
+    Capture rate is timestamp-derived: each episode contributes ``N - 1`` frame
+    intervals divided by its first-to-last realtime timestamp span. This avoids
+    treating the operator's button reaction time as recorded motion duration.
+    """
+    run_dir = Path(output_dir)
+    episode_paths = sorted(run_dir.glob("*.npz"))
+    episodes = []
+    total_frames = 0
+    total_recording_seconds = 0.0
+    total_timestamp_span_seconds = 0.0
+    total_intervals = 0
+
+    for path in episode_paths:
+        with np.load(path, allow_pickle=False) as data:
+            frame_index = np.asarray(data["frame_index"]).reshape(-1)
+            timestamps = np.asarray(data["timestamp_realtime"], dtype=np.float64).reshape(-1)
+            finite_timestamps = timestamps[np.isfinite(timestamps)]
+            frame_count = int(frame_index.size)
+            timestamp_span = (
+                float(finite_timestamps[-1] - finite_timestamps[0])
+                if finite_timestamps.size >= 2
+                else 0.0
+            )
+            interval_count = max(0, int(finite_timestamps.size) - 1)
+            capture_hz = interval_count / timestamp_span if timestamp_span > 0.0 else None
+            recording_seconds = (
+                float(np.asarray(data["recording_seconds"], dtype=np.float64).flat[0])
+                if "recording_seconds" in data
+                else 0.0
+            )
+            primitive = _decode_scalar(data["primitive_label"]) if "primitive_label" in data else ""
+            episode_index = int(data["episode_index"].flat[0]) if "episode_index" in data else None
+            frame_index_contiguous = bool(np.all(np.diff(frame_index) == 1)) if frame_count >= 2 else True
+            episodes.append(
+                {
+                    "filename": path.name,
+                    "episode_index": episode_index,
+                    "primitive": primitive,
+                    "frame_count": frame_count,
+                    "recording_seconds": recording_seconds,
+                    "timestamp_span_seconds": timestamp_span,
+                    "mean_capture_hz": capture_hz,
+                    "frame_index_first": int(frame_index[0]) if frame_count else None,
+                    "frame_index_last": int(frame_index[-1]) if frame_count else None,
+                    "frame_index_contiguous": frame_index_contiguous,
+                }
+            )
+            total_frames += frame_count
+            total_recording_seconds += recording_seconds
+            total_timestamp_span_seconds += timestamp_span
+            total_intervals += interval_count
+
+    summary = {
+        "format_version": 1,
+        "generated_at_utc": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "run_directory": str(run_dir.resolve()),
+        "episode_count": len(episodes),
+        "total_frames": total_frames,
+        "total_recording_seconds": total_recording_seconds,
+        "total_timestamp_span_seconds": total_timestamp_span_seconds,
+        "aggregate_mean_capture_hz": (
+            total_intervals / total_timestamp_span_seconds
+            if total_timestamp_span_seconds > 0.0
+            else None
+        ),
+        "episodes": episodes,
+    }
+    summary_path = run_dir / SUMMARY_FILENAME
+    temporary_path = summary_path.with_suffix(".json.tmp")
+    with temporary_path.open("w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2)
+        f.write("\n")
+    temporary_path.replace(summary_path)
+    return str(summary_path)
 
 
 def create_run_output_dir(output_root: str) -> str:
@@ -540,6 +630,8 @@ def main() -> None:
         episode_index_start=config.episode_index_start,
     )
     recorder.run()
+    summary_path = write_dataset_summary(run_output_dir)
+    print(f"[Recorder] Wrote dataset summary: {summary_path}")
 
 
 if __name__ == "__main__":

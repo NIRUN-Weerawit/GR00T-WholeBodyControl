@@ -17,6 +17,7 @@ from gear_sonic.scripts.run_swing_episode_recorder import (
     SwingEpisodeRecorder,
     create_run_output_dir,
     unpack_pose_message,
+    write_dataset_summary,
 )
 
 HEADER_SIZE = 1280
@@ -102,6 +103,37 @@ class RunOutputDirectoryTest(unittest.TestCase):
 
             self.assertEqual(run_dir, os.path.join(base_dir, "run_4"))
             self.assertTrue(os.path.isdir(run_dir))
+
+    def test_writes_run_summary_from_saved_episodes(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as run_dir:
+            def save_episode(index, timestamps, recording_seconds):
+                n_frames = len(timestamps)
+                np.savez_compressed(
+                    os.path.join(run_dir, f"forehand_right_{index:06d}.npz"),
+                    episode_index=np.array([index], dtype=np.int32),
+                    primitive_label=np.array([b"forehand_right"]),
+                    frame_index=np.arange(index * 10, index * 10 + n_frames, dtype=np.int64)[:, None],
+                    timestamp_realtime=np.asarray(timestamps, dtype=np.float64)[:, None],
+                    recording_seconds=np.array([recording_seconds], dtype=np.float64),
+                )
+
+            save_episode(0, [100.0, 100.02, 100.04], 0.10)
+            save_episode(1, [200.0, 200.01], 0.05)
+
+            summary_path = write_dataset_summary(run_dir)
+
+            with open(summary_path, encoding="utf-8") as f:
+                summary = json.load(f)
+            self.assertEqual(summary["episode_count"], 2)
+            self.assertEqual(summary["total_frames"], 5)
+            self.assertAlmostEqual(summary["total_recording_seconds"], 0.15)
+            self.assertAlmostEqual(summary["aggregate_mean_capture_hz"], 60.0)
+            self.assertEqual(
+                [(episode["filename"], episode["frame_count"]) for episode in summary["episodes"]],
+                [("forehand_right_000000.npz", 3), ("forehand_right_000001.npz", 2)],
+            )
 
 
 class _ZMQHarness(unittest.TestCase):
