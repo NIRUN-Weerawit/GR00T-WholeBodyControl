@@ -82,6 +82,7 @@ bash install_scripts/install_data_collection.sh
 
 5. `gear_sonic_deploy/policy/low_latency` low-latency model - see [6.Verify required model and configuration assets](#6-verify-required-model-and-configuration-assets)
 
+6. `gear_sonic_deploy/Dockerfile.tensorrt10` Docker file
 ---
 
 ## 3. Mandatory hardware/network checks
