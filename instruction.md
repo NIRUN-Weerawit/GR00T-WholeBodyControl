@@ -6,7 +6,9 @@
 
 ---
 
-## 1. Architecture and launch roles
+## 1. Overview
+
+### 1.1 Architecture and launch roles
 
 ```text
 Recorded .npz episode
@@ -15,10 +17,35 @@ Recorded .npz episode
   -> ROS2 / DDS / Unitree SDK2
   -> physical G1 low-level motor commands
 ```
+### 1.2 Available Playback Movements
+
+1. **Walking forward about 2 meters**
+
+<img width="300" height="300" alt="walk_forward" src="https://github.com/NIRUN-Weerawit/GR00T-WholeBodyControl/blob/feature/g1-camera-teleop-sim/swing_episodes/videos/walk_forward.gif" />
+
+2. **Walking backward about 2 meters**
+
+|  |  |
+|---|---|
+| <img width="300" height="300" alt="walk_backward_1" src="https://github.com/NIRUN-Weerawit/GR00T-WholeBodyControl/blob/feature/g1-camera-teleop-sim/swing_episodes/videos/walk_backward.gif" /> | <img width="300" height="300" alt="walk_backward_1" src="https://github.com/NIRUN-Weerawit/GR00T-WholeBodyControl/blob/feature/g1-camera-teleop-sim/swing_episodes/videos/walk_backward_1.gif" /> |
+
+3. **Waving left hand**
+<img width="300" height="300" alt="walk_backward_1" src="https://github.com/NIRUN-Weerawit/GR00T-WholeBodyControl/blob/feature/g1-camera-teleop-sim/swing_episodes/videos/waving_hand.gif" />
+
+4. **Swinging tennis racket**
+
+|  |  |
+|---|---|
+| <img width="300" height="300" alt="walk_backward_1" src="https://github.com/NIRUN-Weerawit/GR00T-WholeBodyControl/blob/feature/g1-camera-teleop-sim/swing_episodes/videos/swing_1.gif" /> | <img width="300" height="300" alt="walk_backward_1" src="https://github.com/NIRUN-Weerawit/GR00T-WholeBodyControl/blob/feature/g1-camera-teleop-sim/swing_episodes/videos/swing_2.gif" /> |
+| <img width="300" height="300" alt="walk_backward_1" src="https://github.com/NIRUN-Weerawit/GR00T-WholeBodyControl/blob/feature/g1-camera-teleop-sim/swing_episodes/videos/swing_3.gif" /> | <img width="300" height="300" alt="walk_backward_1" src="https://github.com/NIRUN-Weerawit/GR00T-WholeBodyControl/blob/feature/g1-camera-teleop-sim/swing_episodes/videos/swing_4.gif" /> |
+
+Before using the recorded movement on real G1, please verify the movement in MuJoCo first. 
 
 ---
 
-## 2. Required environments
+## 2. Requirements
+
+### 2.1 Required environments
 
 Run commands from the repository root unless a step says otherwise:
 
@@ -32,6 +59,28 @@ cd ~/GR00T-WholeBodyControl
 | Recorded-episode replayer | `.venv_data_collection` | Python, NumPy, ZMQ, Tyro |
 | Live PICO manager, if used instead of replay | `.venv_teleop` | XRoboToolkit / PICO dependencies |
 | MuJoCo only | `.venv_sim` | Not needed for a physical G1 run |
+
+* If you don't have `.venv_sim` yet, install MuJoCo environment using this command
+```bash
+bash install_scripts/install_mujoco_sim.sh 
+```
+
+* If you don't have `.venv_data_collection` yet, create with the following command:
+```bash
+bash install_scripts/install_data_collection.sh
+```
+
+### 2.2 Required scripts, recorded movement files, and models
+
+1. `gear_sonic/scripts/run_swing_episode_replayer.py` - main script for sending a stream of recorded SMPL movement to `SONIC` model 
+
+2. `gear_sonic_deploy/run_docker_real.sh` - Docker-version deployment script (substitute of `./deploy.sh`) 
+
+3. `gear_sonic_deploy/run_docker_zmq.sh` (Optional, for sim only deployment)
+
+4. `swing_episodes/*` - recorded movements to be used with `run_swing_episode_replayer.py` If it does not exist, download from here: 
+
+5. `gear_sonic_deploy/policy/low_latency` low-latency model - see [6.Verify required model and configuration assets](#6-verify-required-model-and-configuration-assets)
 
 ---
 
@@ -176,32 +225,23 @@ Expected categories:
 
 ### 8.1 Test the desired behavior in MuJoCo before deploying on real G1 (Optional)
 
-*If you don't have `.venv_sim` yet, install MuJoCo environment using this command
-```bash
-cd ~/GR00T-WholeBodyControl
-bash install_scripts/install_mujoco_sim.sh 
-```
 ### Terminal A — MuJoCo sim loop
 ```bash
-cd ~/GR00T-WholeBodyControl
 source .venv_sim/bin/activate
 python3 gear_sonic/scripts/run_sim_loop.py   --enable-onscreen --enable-offscreen
 ```
 
 ### Terminal B — sim G1 deploy 
 ```bash
-cd ~/GR00T-WholeBodyControl
 ./gear_sonic_deploy/run_docker_zmq.sh
 ```
 `run_docker_zmq.sh` uses loopback (`lo`) and ZMQ-only action output for MuJoCo.
 
 ### Terminal C — recorded-episode replayer
 
-
-Wait until Terminal A finishes initialization and is listening on ZMQ port `5556`.
+Wait until Terminal B finishes initialization and is listening on ZMQ port `5556`.
 
 ```bash
-cd ~/GR00T-WholeBodyControl
 source .venv_data_collection/bin/activate
 unset PYTHONPATH
 
@@ -211,11 +251,6 @@ python gear_sonic/scripts/run_swing_episode_replayer.py \
 
 The replayer binds ZMQ `:5556`; deploy subscribers connect to it.
 
-* If you don't have `.venv_data_collection` yet, create with the following command:
-```bash
-bash install_scripts/install_data_collection.sh
-```
-
 
 ### 8.2 recorded full-body motion playback in real G1
 
@@ -224,11 +259,8 @@ Use three terminals.
 ### Terminal A — real G1 deploy
 
 ```bash
-cd ~/GR00T-WholeBodyControl
 ./gear_sonic_deploy/run_docker_real.sh --interface <G1_WIRED_INTERFACE>
 ```
-
-Do not use `--no-prompt` initially. Read the printed model paths and interface carefully, then answer `y` only after the safety gate is complete.
 
 The container is named:
 
@@ -243,12 +275,12 @@ It uses host networking so DDS and ZMQ use the host network namespace.
 Wait until Terminal A finishes initialization and is listening on ZMQ port `5556`.
 
 ```bash
-cd ~/GR00T-WholeBodyControl
 source .venv_data_collection/bin/activate
 unset PYTHONPATH
 
 python gear_sonic/scripts/run_swing_episode_replayer.py \
-  --data-dir swing_episodes/forehand_right \
+  --data-dir swing_episodes/forehand_right
+# change `swing_episodes/forehand_right` to your desired movement 
 ```
 
 The replayer binds ZMQ `:5556`; deploy subscribers connect to it.
@@ -266,14 +298,22 @@ docker logs -f g1-real
 
 ## 9. Interactive replay sequence
 
-The replayer starts in full-body mode.
+The replayer starts in full-body mode. 
+Read this 
+1. This script will auto-detect all episodes in the specified `--data-dir`, so once you start the script, you can select/change the episode you'd like directly from the CLI. You don't need to re-run the script for changing episode of the same movement (but you still need to re-run new command for changing the movement)
+2. Before pressing `r`, confirm the deploy reports its planner/control transition. 
+3. When changing to another episode while the current one is running, it will stop the current episode.  
+4. Each episode has varying frequency of data. Match the frequency of data streaming to the recorded frequency by using `UP` and `DOWN` arrows for increasing or decreasing the frequency.
+   - Higher = Faster movement
+   - You can keep it at 30 Hz for all movement for safety.
+   - You can increase it higher than the recorded for faster movement, but it might not be stable.
 
 ### Full-body SMPL playback
 
-Order of replay 
+Order of operation (Quick start)
 ```text
 p → m  → r 
-(robot starts to stand still on its own) → (change mode to receive playback command) → (start to replay)
+(robot starts to stand still on its own) → (change mode to receive playback command) → (start to replay at 30 Hz)
 ```
 
 | Key | Meaning |
@@ -288,8 +328,6 @@ p → m  → r
 | `DOWN` arrow | Decrease frequency |
 | `RIGHT` arrow | Next episode |
 | `LEFT` arrow | Previous episode |
-
-Before pressing `r`, confirm the deploy reports its planner/control transition. 
 
 
 
