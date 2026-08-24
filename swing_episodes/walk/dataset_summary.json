@@ -1,0 +1,48 @@
+{
+  "format_version": 1,
+  "generated_at_utc": "2026-08-23T07:50:16Z",
+  "run_directory": "/home/ucluser/Godot/GR00T-WholeBodyControl/swing_episodes/run_7",
+  "episode_count": 3,
+  "total_frames": 916,
+  "total_recording_seconds": 16.260499160038307,
+  "total_timestamp_span_seconds": 16.20586323738098,
+  "aggregate_mean_capture_hz": 56.33763451082593,
+  "episodes": [
+    {
+      "filename": "walk_000000.npz",
+      "episode_index": 0,
+      "primitive": "walk",
+      "frame_count": 375,
+      "recording_seconds": 7.246809751028195,
+      "timestamp_span_seconds": 7.224547624588013,
+      "mean_capture_hz": 51.76794720366007,
+      "frame_index_first": 207,
+      "frame_index_last": 581,
+      "frame_index_contiguous": true
+    },
+    {
+      "filename": "walk_000001.npz",
+      "episode_index": 1,
+      "primitive": "walk",
+      "frame_count": 236,
+      "recording_seconds": 3.9314515619771555,
+      "timestamp_span_seconds": 3.913336992263794,
+      "mean_capture_hz": 60.051051178206045,
+      "frame_index_first": 1317,
+      "frame_index_last": 1552,
+      "frame_index_contiguous": true
+    },
+    {
+      "filename": "walk_000002.npz",
+      "episode_index": 2,
+      "primitive": "walk",
+      "frame_count": 305,
+      "recording_seconds": 5.082237847032957,
+      "timestamp_span_seconds": 5.067978620529175,
+      "mean_capture_hz": 59.98446772615977,
+      "frame_index_first": 2087,
+      "frame_index_last": 2391,
+      "frame_index_contiguous": true
+    }
+  ]
+}

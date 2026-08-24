@@ -1,0 +1,48 @@
+{
+  "format_version": 1,
+  "generated_at_utc": "2026-08-23T07:48:54Z",
+  "run_directory": "/home/ucluser/Godot/GR00T-WholeBodyControl/swing_episodes/run_6",
+  "episode_count": 3,
+  "total_frames": 722,
+  "total_recording_seconds": 17.18248226994183,
+  "total_timestamp_span_seconds": 17.148727893829346,
+  "aggregate_mean_capture_hz": 41.927308220845866,
+  "episodes": [
+    {
+      "filename": "waving_hand_000000.npz",
+      "episode_index": 0,
+      "primitive": "waving_hand",
+      "frame_count": 294,
+      "recording_seconds": 9.93591022095643,
+      "timestamp_span_seconds": 9.936700344085693,
+      "mean_capture_hz": 29.486649476593414,
+      "frame_index_first": 311,
+      "frame_index_last": 604,
+      "frame_index_contiguous": true
+    },
+    {
+      "filename": "waving_hand_000001.npz",
+      "episode_index": 1,
+      "primitive": "waving_hand",
+      "frame_count": 352,
+      "recording_seconds": 5.977916767005809,
+      "timestamp_span_seconds": 5.96772313117981,
+      "mean_capture_hz": 58.81640154619704,
+      "frame_index_first": 1070,
+      "frame_index_last": 1421,
+      "frame_index_contiguous": true
+    },
+    {
+      "filename": "waving_hand_000002.npz",
+      "episode_index": 2,
+      "primitive": "waving_hand",
+      "frame_count": 76,
+      "recording_seconds": 1.2686552819795907,
+      "timestamp_span_seconds": 1.2443044185638428,
+      "mean_capture_hz": 60.27463929330401,
+      "frame_index_first": 1677,
+      "frame_index_last": 1752,
+      "frame_index_contiguous": true
+    }
+  ]
+}

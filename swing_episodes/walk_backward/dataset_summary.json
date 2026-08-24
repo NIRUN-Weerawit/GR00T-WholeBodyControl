@@ -1,0 +1,48 @@
+{
+  "format_version": 1,
+  "generated_at_utc": "2026-08-23T07:51:16Z",
+  "run_directory": "/home/ucluser/Godot/GR00T-WholeBodyControl/swing_episodes/run_8",
+  "episode_count": 3,
+  "total_frames": 770,
+  "total_recording_seconds": 15.049157749046572,
+  "total_timestamp_span_seconds": 14.994907855987549,
+  "aggregate_mean_capture_hz": 51.15069778129598,
+  "episodes": [
+    {
+      "filename": "walk_backward_000000.npz",
+      "episode_index": 0,
+      "primitive": "walk_backward",
+      "frame_count": 381,
+      "recording_seconds": 6.773127653985284,
+      "timestamp_span_seconds": 6.755316972732544,
+      "mean_capture_hz": 56.25198662532766,
+      "frame_index_first": 314,
+      "frame_index_last": 694,
+      "frame_index_contiguous": true
+    },
+    {
+      "filename": "walk_backward_000001.npz",
+      "episode_index": 1,
+      "primitive": "walk_backward",
+      "frame_count": 201,
+      "recording_seconds": 4.08302136301063,
+      "timestamp_span_seconds": 4.085251808166504,
+      "mean_capture_hz": 48.95659053383094,
+      "frame_index_first": 952,
+      "frame_index_last": 1152,
+      "frame_index_contiguous": true
+    },
+    {
+      "filename": "walk_backward_000002.npz",
+      "episode_index": 2,
+      "primitive": "walk_backward",
+      "frame_count": 188,
+      "recording_seconds": 4.193008732050657,
+      "timestamp_span_seconds": 4.154339075088501,
+      "mean_capture_hz": 45.013176974731245,
+      "frame_index_first": 1379,
+      "frame_index_last": 1566,
+      "frame_index_contiguous": true
+    }
+  ]
+}
