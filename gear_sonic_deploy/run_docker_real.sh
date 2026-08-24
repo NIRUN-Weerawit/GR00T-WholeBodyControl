@@ -64,9 +64,9 @@ ZMQ_HOST="localhost"
 PICO_HOST="localhost"
 
 # Model paths
-DECODER_MODEL="policy/release/model_decoder.onnx"
-ENCODER_MODEL="policy/release/model_encoder.onnx"
-OBS_CONFIG="policy/release/observation_config.yaml"
+DECODER_MODEL="policy/low_latency/model_decoder.onnx"
+ENCODER_MODEL="policy/low_latency/model_encoder.onnx"
+OBS_CONFIG="policy/low_latency/observation_config.yaml"
 PLANNER_MODEL="planner/target_vel/V2/planner_sonic.onnx"
 MOTION_DATA="reference/example/"
 
